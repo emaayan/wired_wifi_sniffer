@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+	    <title>Wifi Sniffer</title>
+	    <!-- <link rel="icon" href="data:,"> -->
+	    <!-- prevent request for favicon -->
+	    
+	  <!--   <a target="_blank" href="https://icons8.com/icon/rOHcpTUtCTjr/wireshark">Wireshark</a> icon by <a target="_blank" href="https://icons8.com">Icons8</a>-->
+
+<link rel="icon" href="/favicon.ico" type="image/x-icon">
+<style>
+	body {
+		font-family: Arial, sans-serif;
+		padding: 20px;
+	}
+	
+	fieldset {
+		justify-content: space-between;
+		display: flex;
+		flex-direction: row;
+	}
+</style>
+
+<script type="text/javascript">
+	
+	       async function get(value){
+	          const url=`/api/`+value;
+	          try {
+	            console.log(`Getting: ${url}`);
+	
+	            const response = await fetch(url);
+	            const r =await response.text()
+	            console.log(`Got : ${url} ${r}`);
+	            if (!response.ok) {
+	              alert(`Response status: ${r}`);
+	            }
+	            return r;
+	          } catch (error) {
+	            console.error(`Failed getting ${url} ${error}`,error.stack);
+	      //      if (! error instanceof TypeError) {
+	//                alert(error);
+	        //    }
+	          }
+	        }
+	
+	
+	
+	        async function setInitialChannel() {
+	            try {
+	                const channelNumber = await get('channel');
+	                const channel = parseInt(channelNumber);
+	                if (channel >= 1 && channel <= 14) {
+	                    const radioButton = document.querySelector(`input[name="channel"][value="${channel}"]`);
+	                    if (radioButton) {
+	                        radioButton.checked = true;
+	                    }
+	                }
+	            } catch (error) {
+	                console.error(`Error setting initial channel ${error}`, error);
+	            }
+	        }
+	
+	        async function setRssiChannel() {
+	            try {
+	                const rssi = await get('rssi');
+	                const radioButton = document.querySelector(`input[name="rssi"][value="${rssi}"]`);
+	                if (radioButton) {
+	                    radioButton.checked = true;
+	                }
+	
+	            } catch (error) {
+	                console.error(`Error setting initial rssi: ${error}`, error);
+	            }
+	        }
+	
+	        async function setMAC() {
+	            try {
+	                const mac= await get('macFilterAddress');
+	                const text = document.querySelector(`input[name="macFilterAddress"]`);
+	                if (text) {
+	                    text.value = mac;
+	                }
+	
+	            } catch (error) {
+	                console.error(`Error setting initial mac ${error}`, error);
+	            }
+	        }
+	
+	         async function setFrameType() {
+	             try {
+	                 const frameType= await get('frameType');
+	                 var filterFrame=frameType.split(',').map(value => value.trim());
+	
+	              	// Get all checkboxes within the fieldset
+	                 const checkboxes = document.querySelectorAll('input[name="frame"]');
+	
+	                 // Iterate over all checkboxes
+	                 checkboxes.forEach(checkbox => {
+	                     checkbox.checked = filterFrame.includes(checkbox.value);
+	                 });
+	
+	                 	var allFrames= document.getElementById("allframes");
+		             	otherFrames= document.querySelectorAll('input[name="frame"]:not([id="allframes"]')
+	             		otherFrames.forEach((f) => {
+	        	     	    f.disabled = allFrames.checked;
+	    	         	});
+	
+	             } catch (error) {
+	                 console.error(`Error setting initial frameType: ${error}`, error);
+	             }
+	         }
+	         function filterFrame() {
+		        	
+		        	
+		        	var allFrames= document.getElementById("allframes");
+		        	otherFrames= document.querySelectorAll('input[name="frame"]:not([id="allframes"]')
+		        	otherFrames.forEach((f) => {
+		        	    f.disabled = allFrames.checked;
+		        	});
+		
+		        	var checkboxes = document.querySelectorAll('input[name="frame"]');
+		        	checkedValues = Array.from(checkboxes).filter(cb=> allFrames.checked || cb.checked  ).map(cb => cb.value).join(',');
+		
+		            get(`filter?frame=${checkedValues}`);
+		            
+		        }
+		
+	
+	        function setTime(){
+	        	const v=Date.now();
+	        	get(`time?value=${v}`);
+	        }
+	
+	        async function getTime(){
+	        	const t=await get (`time`);
+	        	return t;
+	        }
+	
+	        setInitialChannel();
+	        setRssiChannel();
+	        setMAC();
+	        setFrameType();
+			//setTime();
+			//getTime();	     
+	
+	      
+	       
+	        async function onPageFocus() {
+	    		setTime();
+	    		const l=await getTime();	    		
+	    		const d=new Date(l*1);	    
+	    		document.getElementById("time").innerHTML=d.toLocaleString();
+	        }
+	        
+	        onPageFocus();
+	        // Add an event listener for the focus event
+	        window.addEventListener("focus", onPageFocus);
+	
+	        function copyCommand(){
+	        	
+	        	var copyText = `wireshark -i TCP@${window.location.hostname} -k`;// document.getElementById("myInput");
+	        	alert(`paste ${copyText} to your run bar`);
+	        	const textArea = document.createElement("textarea");
+	            textArea.value = copyText;
+	                
+	            // Move textarea out of the viewport so it's not visible
+	            textArea.style.position = "absolute";
+	            textArea.style.left = "-999999px";
+	                
+	            document.body.prepend(textArea);
+	            textArea.select();
+
+	            try {
+	                document.execCommand('copy');
+	            } catch (error) {
+	                console.error(error);
+	            } finally {
+	                textArea.remove();
+	            }
+	        //	copyText.select();
+    	    	//copyText.setSelectionRange(0, 99999); // For mobile devices        	   
+        	 // navigator.clipboard.writeText(copyText);
+			}
+	    </script>
+	</head>
+	<body>
+	
+		<iframe name="devnull" style="display:none" class="hidden"  src="/api/filter"></iframe>
+		
+		<form id="macFilterForm" name="macFilterForm" target="devnull" method="get" action="/api/filter" >
+			<fieldset style="float: left;">
+			    	<legend>MAC Filter</legend>           
+			        <input type="text" id="macFilterAddress" name="macFilterAddress" placeholder="MAC address" autocomplete="on" pattern="(?:[0-9A-Fa-f]{2}){1,6}$" maxlength="12">
+			        <button type="submit">OK</button>    
+			</fieldset>
+		</form>
+		
+		<form style="float:left ;" id="rssiForm" name="rssiForm" target="devnull" method="get" action="/api/filter" >
+			<fieldset  >
+			    <legend>RSSI Threshold</legend>
+			    <label style="margin-right: 10px;"><input style="margin-right: 5px;" type="radio" name="rssi" value="-50" onclick="rssiForm.submit()">-50 </label><br>
+			    <label style="margin-right: 10px;"><input style="margin-right: 5px;" type="radio" name="rssi" value="-70" onclick="rssiForm.submit()">-70 </label><br>
+			    <label style="margin-right: 10px;"><input style="margin-right: 5px;" type="radio" name="rssi" value="-90" onclick="rssiForm.submit()">-90 </label><br>
+			</fieldset>
+		</form>
+		
+		<fieldset >
+			    <legend>Properties</legend>
+			    <label>Time in sniffer: <span id="time"></span></label>
+			    <button title="This will copy wireshark command to your clipboard, paste it to your windows command"  onclick="copyCommand()">Wireshark</button>
+		</fieldset>
+		
+		<form  id="frameTypeForm" name="frameTypeForm" target="devnull" method="get" action="/api/filter" >
+			<fieldset style=" clear: both;">
+			    <legend>Frame</legend>
+			    <label><input type="checkbox" name="frame" value="all" onclick="filterFrame()" id="allframes" > All</label><br>
+			    <label><input type="checkbox" name="frame" value="mgmt" onclick="filterFrame()"> Mgmt</label><br>
+			    <label><input type="checkbox" name="frame" value="data" onclick="filterFrame()"> Data</label><br>
+			    <label><input type="checkbox" name="frame" value="ctrl" onclick="filterFrame()"> Ctrl</label><br>
+			    <label><input type="checkbox" name="frame" value="misc" onclick="filterFrame()"> Misc</label><br>
+			    <label><input type="checkbox" name="frame" value="mpdu" onclick="filterFrame()"> MPDU</label><br>
+			    <label><input type="checkbox" name="frame" value="ampdu" onclick="filterFrame()"> AMPDU</label><br>
+			    <label><input type="checkbox" name="frame" value="fcsfail" onclick="filterFrame()"> FCS Fail</label>
+			</fieldset>
+		</form>
+		
+		<form id="channelForm" name="channelForm" target="devnull" method="get" action="/api/filter" >
+			<fieldset>
+			    <legend>Channel</legend>
+			    <label><input default type="radio" name="channel" value="1" onclick="channelForm.submit()"> 1</label><br>
+			    <label><input type="radio" name="channel" value="2" onclick="channelForm.submit()"> 2</label><br>
+			    <label><input type="radio" name="channel" value="3" onclick="channelForm.submit()"> 3</label><br>
+			    <label><input type="radio" name="channel" value="4" onclick="channelForm.submit()"> 4</label><br>
+			    <label><input type="radio" name="channel" value="5" onclick="channelForm.submit()"> 5</label><br>
+			    <label><input type="radio" name="channel" value="6" onclick="channelForm.submit()"> 6</label><br>
+			    <label><input type="radio" name="channel" value="7" onclick="channelForm.submit()"> 7</label><br>
+			    <label><input type="radio" name="channel" value="8" onclick="channelForm.submit()"> 8</label><br>
+			    <label><input type="radio" name="channel" value="9" onclick="channelForm.submit()"> 9</label><br>
+			    <label><input type="radio" name="channel" value="10" onclick="channelForm.submit()"> 10</label><br>
+			    <label><input type="radio" name="channel" value="11" onclick="channelForm.submit()"> 11</label><br>
+			    <label><input type="radio" name="channel" value="12" onclick="channelForm.submit()"> 12</label><br>
+			    <label><input type="radio" name="channel" value="13" onclick="channelForm.submit()"> 13</label><br>
+			    <label><input type="radio" name="channel" value="14" onclick="channelForm.submit()"> 14</label>
+			</fieldset>
+		</form>
+	
+	</body>
+</html>

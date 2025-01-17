@@ -1,0 +1,4 @@
+sdkconfig
+/build/
+.settings/
+managed_components
