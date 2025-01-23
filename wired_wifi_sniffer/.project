@@ -21,6 +21,5 @@
 		<nature>org.eclipse.cdt.core.cnature</nature>
 		<nature>org.eclipse.cdt.core.ccnature</nature>
 		<nature>com.espressif.idf.core.idfNature</nature>
-		<nature>org.python.pydev.pythonNature</nature>
 	</natures>
 </projectDescription>

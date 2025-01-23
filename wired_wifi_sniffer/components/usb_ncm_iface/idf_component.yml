@@ -1,5 +1,5 @@
 dependencies:  
-#  esp_tinyusb: "^1.6.0"  
-  # tinyusb: "^0.17.0"
+  esp_tinyusb: "^1.6.0"  
+  tinyusb: "^0.17.0"
   espressif/mdns: "^1.0.0"
   #tinyusb: '0.15.0~1'
