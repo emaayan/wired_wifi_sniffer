@@ -158,44 +158,21 @@ static bool packet_mac_filter(wifi_promiscuous_pkt_type_t type, addrFilter_t add
 
 static esp_err_t packet_capture(wifi_promiscuous_pkt_type_t type, pcap_rec_t *pcap_rec, int sock) {
 	esp_err_t esp_err;
-	if (sock) {
-
-		// ESP_LOGI(CMD_PCAP_TAG,"%d ",sz);
-		// ESP_LOG_BUFFER_HEX(CMD_PCAP_TAG, pcap_rec->buf,sz);
-
-		bool macFilter = true; // packet_mac_filter(type, snf_rt.addr2_filter, pcap_rec->buf);
-		if (macFilter) {
-			size_t real_write = 0;
-
-			// ESP_LOGI(SNIFFER_TAG,"seconds: %"PRIu32 " miliseconds: %"PRIu32 " ,original len:%"PRIu32" , incl len: %"PRIu32,pcap_rec->pcap_rec_hdr.ts_sec,pcap_rec->pcap_rec_hdr.ts_usec,pcap_rec->pcap_rec_hdr.orig_len,pcap_rec->pcap_rec_hdr.incl_len);
-			// ESP_LOG_BUFFER_HEX(SNIFFER_TAG, pcap_rec, sizeof(pcap_rec_t)-sizeof(pcap_rec->buf));
-			/*
-			 size_t sz=pcap_rec->pcap_rec_hdr.incl_len-pcap_rec->ieee80211_radiotap_header.it_len;
-			 real_write=onSend(sock,pcap_rec, sizeof(pcap_rec_t)-MAX_LENGTH+sz );
-			  if (!real_write){
-				 esp_err=ESP_ERR_INVALID_STATE;
-			  }else{
-				  esp_err = ESP_OK;
-			  }	*/
-
-			real_write = onSend(sock, pcap_rec, sizeof(pcap_rec_t) - sizeof(pcap_rec->buf));
+	if (sock) {					
+		size_t real_write = 0;
+		real_write = onSend(sock, pcap_rec, sizeof(pcap_rec_t) - sizeof(pcap_rec->buf));
+		if (!real_write) {
+			esp_err = ESP_ERR_INVALID_STATE;
+		} else {
+			size_t sz = pcap_rec->pcap_rec_hdr.incl_len - pcap_rec->ieee80211_radiotap_header.it_len;
+			real_write = onSend(sock, pcap_rec->buf, sz);
+			//   free(pcap_rec->buf);
 			if (!real_write) {
 				esp_err = ESP_ERR_INVALID_STATE;
 			} else {
-				size_t sz = pcap_rec->pcap_rec_hdr.incl_len - pcap_rec->ieee80211_radiotap_header.it_len;
-				real_write = onSend(sock, pcap_rec->buf, sz);
-				//   free(pcap_rec->buf);
-				if (!real_write) {
-					esp_err = ESP_ERR_INVALID_STATE;
-				} else {
-					esp_err = ESP_OK;
-				}
+				esp_err = ESP_OK;
 			}
-
-		} else {
-			esp_err = ESP_OK;
 		}
-
 	} else {
 		ESP_LOGE(TAG, "No Socket");
 		esp_err = ESP_ERR_INVALID_STATE;
@@ -207,7 +184,7 @@ static esp_err_t packet_capture(wifi_promiscuous_pkt_type_t type, pcap_rec_t *pc
 	return esp_err;
 }
 
-#include <sys/time.h>
+
 
 static struct timeval current_time = {
 	.tv_sec = 0,
@@ -226,8 +203,7 @@ struct timeval to_timeval(int64_t epoch) {
 }
 
 void sniffer_set_time(uint64_t t) {
-	current_time.tv_sec = t / 1000;
-	current_time.tv_usec = ((t % 1000) * 1000);
+	current_time=to_timeval(t);	
 	timer = esp_timer_get_time();
 }
 
@@ -237,10 +213,11 @@ static void wifi_sniffer_cb(void *recv_buf, wifi_promiscuous_pkt_type_t type) {
 	if (type != WIFI_PKT_MISC && !sniffer->rx_ctrl.rx_state && sniffer->rx_ctrl.rssi >= snf_rt.rssi_th) {
 		bool b = packet_mac_filter(type, snf_rt.addr2_filter, sniffer->payload);
 		if (b) {
-			pcap_rec_t pcap_rec = capture_create_pcap_record(sniffer);
-			pcap_rec.pcap_rec_hdr.ts_sec = current_time.tv_sec;
+			pcap_rec_t pcap_rec = capture_create_pcap_record(sniffer);			
 			// int64_t ts_micro=sniffer->rx_ctrl.timestamp;//this is tied to when esp_wifi_start is called
-			pcap_rec.pcap_rec_hdr.ts_usec = current_time.tv_usec + esp_timer_get_time() - timer; // ts_micro;
+			struct timeval tt= to_timeval((esp_timer_get_time()-timer)/1000);
+			pcap_rec.pcap_rec_hdr.ts_sec=current_time.tv_sec+tt.tv_sec;
+			pcap_rec.pcap_rec_hdr.ts_usec=current_time.tv_usec+tt.tv_usec;
 			packet_capture(type, &pcap_rec, snf_rt.sock);
 		}
 	}
