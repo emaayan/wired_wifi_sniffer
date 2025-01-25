@@ -23,6 +23,23 @@
 
 <script type="text/javascript">
 	
+			async function getFilter(){
+			    const url=`/api/filter`;
+			    try {
+			      console.log(`Getting: ${url}`);
+			
+			      const response = await fetch(url);
+			      const r =await response.json()			      
+			      console.log(`Got : ${url} ${r}`);
+			      if (!response.ok) {
+			        alert(`Response status: ${r}`);
+			      }
+			      return r;
+			    } catch (error) {
+			      console.error(`Failed getting ${url} ${error}`,error.stack);			
+			    }
+			 }
+			 
 	       async function get(value){
 	          const url=`/api/`+value;
 	          try {
@@ -43,87 +60,19 @@
 	          }
 	        }
 	
+			     	       	   
+	         function filterFrame() {		        			        
+	        	const  allFrames= document.getElementById("allframes");
+	        	otherFrames= document.querySelectorAll('input[name="frame"]:not([id="allframes"]')
+	        	otherFrames.forEach((f) => {
+	        	    f.disabled = allFrames.checked;
+	        	});
 	
+	        	const checkboxes = document.querySelectorAll('input[name="frame"]');
+	        	checkedValues = Array.from(checkboxes).filter(cb=> allFrames.checked || cb.checked  ).map(cb => cb.value).join(',');
 	
-	        async function setInitialChannel() {
-	            try {
-	                const channelNumber = await get('channel');
-	                const channel = parseInt(channelNumber);
-	                if (channel >= 1 && channel <= 14) {
-	                    const radioButton = document.querySelector(`input[name="channel"][value="${channel}"]`);
-	                    if (radioButton) {
-	                        radioButton.checked = true;
-	                    }
-	                }
-	            } catch (error) {
-	                console.error(`Error setting initial channel ${error}`, error);
-	            }
-	        }
-	
-	        async function setRssiChannel() {
-	            try {
-	                const rssi = await get('rssi');
-	                const radioButton = document.querySelector(`input[name="rssi"][value="${rssi}"]`);
-	                if (radioButton) {
-	                    radioButton.checked = true;
-	                }
-	
-	            } catch (error) {
-	                console.error(`Error setting initial rssi: ${error}`, error);
-	            }
-	        }
-	
-	        async function setMAC() {
-	            try {
-	                const mac= await get('macFilterAddress');
-	                const text = document.querySelector(`input[name="macFilterAddress"]`);
-	                if (text) {
-	                    text.value = mac;
-	                }
-	
-	            } catch (error) {
-	                console.error(`Error setting initial mac ${error}`, error);
-	            }
-	        }
-	
-	         async function setFrameType() {
-	             try {
-	                 const frameType= await get('frameType');
-	                 var filterFrame=frameType.split(',').map(value => value.trim());
-	
-	              	// Get all checkboxes within the fieldset
-	                 const checkboxes = document.querySelectorAll('input[name="frame"]');
-	
-	                 // Iterate over all checkboxes
-	                 checkboxes.forEach(checkbox => {
-	                     checkbox.checked = filterFrame.includes(checkbox.value);
-	                 });
-	
-	                 	var allFrames= document.getElementById("allframes");
-		             	otherFrames= document.querySelectorAll('input[name="frame"]:not([id="allframes"]')
-	             		otherFrames.forEach((f) => {
-	        	     	    f.disabled = allFrames.checked;
-	    	         	});
-	
-	             } catch (error) {
-	                 console.error(`Error setting initial frameType: ${error}`, error);
-	             }
-	         }
-	         function filterFrame() {
-		        	
-		        	
-		        	var allFrames= document.getElementById("allframes");
-		        	otherFrames= document.querySelectorAll('input[name="frame"]:not([id="allframes"]')
-		        	otherFrames.forEach((f) => {
-		        	    f.disabled = allFrames.checked;
-		        	});
-		
-		        	var checkboxes = document.querySelectorAll('input[name="frame"]');
-		        	checkedValues = Array.from(checkboxes).filter(cb=> allFrames.checked || cb.checked  ).map(cb => cb.value).join(',');
-		
-		            get(`filter?frame=${checkedValues}`);
-		            
-		        }
+	            get(`filter?frame=${checkedValues}`);		            
+		    }
 		
 	
 	        function setTime(){
@@ -135,15 +84,47 @@
 	        	const t=await get (`time`);
 	        	return t;
 	        }
-	
-	        setInitialChannel();
-	        setRssiChannel();
-	        setMAC();
-	        setFrameType();
-			//setTime();
-			//getTime();	     
-	
-	      
+	        
+	        async function fillForm(){
+				const r=await getFilter();
+				
+				document.title = r.version;
+				
+				const rssi=r.rssi;				
+				const rssiRadioButton = document.querySelector(`input[name="rssi"][value="${rssi}"]`);
+                if (rssiRadioButton) {
+                    rssiRadioButton.checked = true;
+                }
+                
+                const channel = parseInt(r.channel);
+                if (channel >= 1 && channel <= 14) {
+                    const chRadioButton = document.querySelector(`input[name="channel"][value="${channel}"]`);
+                    if (chRadioButton) {
+                        chRadioButton.checked = true;
+                    }
+                }
+                
+                const text = document.querySelector(`input[name="macFilterAddress"]`);
+	            if (text) {
+	               text.value = r.mac;
+	            }
+	            
+	            const frameType=r.frameType;
+	            const filterFrame=frameType.split(',').map(value => value.trim());	
+              	// Get all checkboxes within the fieldset
+                 const checkboxes = document.querySelectorAll('input[name="frame"]');            
+                 checkboxes.forEach(checkbox => {
+                     checkbox.checked = filterFrame.includes(checkbox.value);
+                 });
+                const allFrames= document.getElementById("allframes");
+             	otherFrames= document.querySelectorAll('input[name="frame"]:not([id="allframes"]')
+            		otherFrames.forEach((f) => {
+       	     	    f.disabled = allFrames.checked;
+   	         	});
+			}
+				  
+	        fillForm();
+					     
 	       
 	        async function onPageFocus() {
 	    		setTime();

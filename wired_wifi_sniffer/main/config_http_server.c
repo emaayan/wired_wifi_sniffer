@@ -1,19 +1,29 @@
+#include <config_http_server.h>
+
+#include "esp_vfs.h"
 #include "esp_check.h"
 #include "esp_err.h"
-#include <complex.h>
-#include <esp_http_server.h>
-#include <stdint.h>
-#include <stdlib.h>
+#include "esp_http_server.h"
+#include "esp_app_desc.h"
 
-#define CONFIG_HTTP_QUERY_KEY_MAX_LEN (64)
-#include "esp_vfs.h"
+#include <complex.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <fcntl.h>
+
+#include "sniffer.h"
+#include "cJSON.h"
+
 static const char *TAG = "config_http_server";
+#define CONFIG_HTTP_QUERY_KEY_MAX_LEN (64)
 #define FILE_PATH_MAX (ESP_VFS_PATH_MAX + 128)
 #define SCRATCH_BUFSIZE (256)
-#include "sniffer.h"
-//TODO: unified this macroc of MOUNT_POINT IN main
-#define ROOT "/data/" 
+
+
+static config_http_server_prm_t _config_http_server_prm;
+static httpd_handle_t server;
 static esp_err_t index_get_handler(httpd_req_t *req) {
 
 	/* Get header value string length and allocate memory for length + 1,
@@ -28,7 +38,9 @@ static esp_err_t index_get_handler(httpd_req_t *req) {
 		free(buf);
 	}
 
-	char filepath[FILE_PATH_MAX] = ROOT "index.html";
+	char filepath[FILE_PATH_MAX] ="";
+	snprintf(filepath,sizeof(filepath),"%s%s", _config_http_server_prm.rootdir, "index.html");
+	 
 	int fd = open(filepath, O_RDONLY, 0);
 	if (fd == -1) {
 		ESP_LOGE(TAG, "Failed to open file : %s", filepath);
@@ -81,7 +93,7 @@ int parseInt(const char *s, int *i) {
 
 	l = strtol(s, &ep, 0);
 
-	if (*ep != 0){
+	if (*ep != 0) {
 		return 0;
 	}
 
@@ -89,89 +101,8 @@ int parseInt(const char *s, int *i) {
 	return 1;
 }
 
-static esp_err_t channel_get_handler(httpd_req_t *req) {
-	int32_t ch = sniffer_channel();
-	ESP_LOGI(TAG, "Getting channel %" PRIu32, ch);
-	char ch_str[3];
-	itoa(ch, ch_str, 10);
-	esp_err_t ret = httpd_resp_send(req, ch_str, HTTPD_RESP_USE_STRLEN);
-	;
-	httpd_resp_send_chunk(req, NULL, 0);
-	return ret;
-}
 
-static const httpd_uri_t channel = {
-	.uri = "/api/channel",
-	.method = HTTP_GET,
-	.handler = channel_get_handler,
-	.user_ctx = NULL,
-};
 
-static void tohex(addrFilter_t addrFilter, char *stringbuf, size_t sz) {
-	char *buf2 = stringbuf;
-	char *endofbuf = stringbuf + sz;
-	for (int i = 0; i < addrFilter.size; i++) {
-		/* i use 5 here since we are going to add at most 
-	       3 chars, need a space for the end '\n' and need
-	       a null terminator */
-		if (buf2 + 5 < endofbuf) {
-			buf2 += sprintf(buf2, "%02X", addrFilter.addr[i]);
-		}
-	}
-	buf2 += sprintf(buf2, "\n");
-}
-
-static esp_err_t mac_get_handler(httpd_req_t *req) {
-	addrFilter_t ad = sniffer_mac();
-	char mac[13] = {};
-	tohex(ad, mac, sizeof(mac));
-	ESP_LOGI(TAG, "Getting mac %s", mac);
-	esp_err_t ret = httpd_resp_send(req, mac, HTTPD_RESP_USE_STRLEN);
-	httpd_resp_send_chunk(req, NULL, 0);
-	return ret;
-}
-
-static const httpd_uri_t mac = {
-	.uri = "/api/macFilterAddress",
-	.method = HTTP_GET,
-	.handler = mac_get_handler,
-	.user_ctx = NULL,
-};
-
-static esp_err_t frame_type_get_handler(httpd_req_t *req) {
-	char res[MAX_RESULT_FRAME_LEN] = {""};
-	esp_err_t erp_err = sniffer_frame_type(res);
-	ESP_LOGI(TAG, "Getting frame type %s", res);
-	ESP_ERROR_CHECK_WITHOUT_ABORT(erp_err);
-	esp_err_t ret = httpd_resp_send(req, res, HTTPD_RESP_USE_STRLEN);
-	httpd_resp_send_chunk(req, NULL, 0);
-	return ret;
-}
-
-static const httpd_uri_t frameType = {
-	.uri = "/api/frameType",
-	.method = HTTP_GET,
-	.handler = frame_type_get_handler,
-	.user_ctx = NULL,
-};
-
-static esp_err_t rssi_get_handler(httpd_req_t *req) {
-	int32_t rssi = sniffer_rssi();
-	ESP_LOGI(TAG, "Getting RSSI %" PRIi32, rssi);
-	char rssi_str[3];
-	itoa(rssi, rssi_str, 10);
-	esp_err_t ret = httpd_resp_send(req, rssi_str, HTTPD_RESP_USE_STRLEN);
-	;
-	httpd_resp_send_chunk(req, NULL, 0);
-	return ret;
-}
-
-static const httpd_uri_t rssi = {
-	.uri = "/api/rssi",
-	.method = HTTP_GET,
-	.handler = rssi_get_handler,
-	.user_ctx = NULL,
-};
 
 static esp_err_t timer_get_handler(httpd_req_t *req) {
 
@@ -210,8 +141,12 @@ static const httpd_uri_t timerset = {
 	.user_ctx = NULL,
 };
 
+
+#define FAVICON_FILE "favicon.ico"
 static esp_err_t favicon_get_handler(httpd_req_t *req) {
-	char filepath[FILE_PATH_MAX] = ROOT "favicon.ico";
+	char filepath[FILE_PATH_MAX] = "";	
+	snprintf(filepath,sizeof(filepath),"%s%s", _config_http_server_prm.rootdir, FAVICON_FILE);
+	
 	int fd = open(filepath, O_RDONLY, 0);
 	if (fd == -1) {
 		ESP_LOGE(TAG, "Failed to open file : %s", filepath);
@@ -247,7 +182,7 @@ static esp_err_t favicon_get_handler(httpd_req_t *req) {
 }
 
 static const httpd_uri_t favicon = {
-	.uri = "/favicon.ico",
+	.uri = "/"FAVICON_FILE,
 	.method = HTTP_GET,
 	.handler = favicon_get_handler,
 	.user_ctx = NULL,
@@ -330,6 +265,38 @@ static esp_err_t filter_get_handler(httpd_req_t *req) {
 			}
 		}
 		free(buf);
+	}else{
+		
+		
+		 httpd_resp_set_type(req, "application/json");
+		 cJSON *root = cJSON_CreateObject();
+		 
+		 const esp_app_desc_t *esp_app_desc = esp_app_get_description();	
+		 char buffer[64] = "";
+		 snprintf(buffer,sizeof(buffer),"%s",esp_app_desc->project_name);
+		 cJSON_AddStringToObject(root, "version", buffer);		 
+		 
+		 char res[MAX_RESULT_FRAME_LEN] = {""};
+	  	 sniffer_frame_type(res);
+		 cJSON_AddStringToObject(root, "frameType", res);
+		
+		 addrFilter_t ad = sniffer_mac();
+		 char mac[13] = "";
+		 tohex(ad, mac, sizeof(mac));
+	     cJSON_AddStringToObject(root, "mac" , mac);
+	     
+		 int32_t rssi = sniffer_rssi();					 	
+    	 cJSON_AddNumberToObject(root, "rssi", rssi);
+    	     	 
+		 int32_t chanel = sniffer_channel();					 	
+    	 cJSON_AddNumberToObject(root, "channel", chanel);    	 
+    	 
+    	 const char *resp = cJSON_Print(root);
+	     httpd_resp_sendstr(req, resp);
+	     free((void *)resp);
+	     cJSON_Delete(root);
+	     
+
 	}
 
 	httpd_resp_send_chunk(req, NULL, 0);
@@ -356,23 +323,19 @@ esp_err_t http_404_error_handler(httpd_req_t *req, httpd_err_code_t err) {
 
 static httpd_handle_t start_webserver(void) {
 	httpd_handle_t server = NULL;
-	httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-
+	httpd_config_t config = HTTPD_DEFAULT_CONFIG();	
 	config.lru_purge_enable = true;
 
 	ESP_LOGI(TAG, "Starting server on port: '%d'", config.server_port);
 	if (httpd_start(&server, &config) == ESP_OK) {
 		// Set URI handlers
 		ESP_LOGI(TAG, "Registering URI handlers");
-		httpd_register_uri_handler(server, &index_page);
+		httpd_register_uri_handler(server, &index_page);		
 		httpd_register_uri_handler(server, &favicon);
+		
 		httpd_register_uri_handler(server, &filter);
 		httpd_register_uri_handler(server, &timerset);
-
-		httpd_register_uri_handler(server, &frameType);
-		httpd_register_uri_handler(server, &channel);
-		httpd_register_uri_handler(server, &mac);
-		httpd_register_uri_handler(server, &rssi);
+ 
 
 		return server;
 	}
@@ -387,7 +350,7 @@ static esp_err_t stop_webserver(httpd_handle_t server) {
 	return httpd_stop(server);
 }*/
 
-static httpd_handle_t server;
-void init_http_server(void) {
+void init_config_http_server(config_http_server_prm_t config_http_server_prm) {
+	_config_http_server_prm = config_http_server_prm;
 	server = start_webserver();
 }

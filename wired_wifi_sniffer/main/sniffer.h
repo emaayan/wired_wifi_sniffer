@@ -205,7 +205,8 @@ esp_err_t sniffer_frame_type(char result[]);
 void sniffer_rssi_filter(int rssi);
 int32_t sniffer_rssi();
 
-addrFilter_t sniffer_mac();
+void tohex(addrFilter_t addrFilter, char *stringbuf, size_t sz);
+addrFilter_t sniffer_mac(); 
 void sniffer_set_time(uint64_t t);
 uint64_t sniffer_get_time();
 #ifdef __cplusplus

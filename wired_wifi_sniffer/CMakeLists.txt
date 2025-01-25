@@ -7,7 +7,7 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD ON)
 
 file(READ "version.txt" PROJECT_VER)
-set(PROJECT_PREF "WirlessSniffer") 
+set(PROJECT_PREF "WirelessSniffer") 
 set(PROJECT_BIN "${PROJECT_PREF}_${PROJECT_VER}")
 
 project("${PROJECT_BIN}")

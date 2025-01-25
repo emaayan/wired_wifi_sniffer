@@ -67,13 +67,23 @@ static esp_err_t tinyusb_netif_recv_cb(void *buffer, uint16_t len, void *ctx) {
 	}
 	return ESP_OK;
 }
-
+//#include "tusb_console.h"
+//#include "tusb_cdc_acm.h"
+//#include "esp_check.h"
 static esp_err_t create_usb_eth_if(esp_netif_t *s_netif, tusb_net_rx_cb_t tusb_net_rx_cb, tusb_net_free_tx_cb_t tusb_net_free_tx_cb) {
 	const tinyusb_config_t tusb_cfg = {
 		.external_phy = false,
 	};
 
+
+	
 	ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
+	
+	
+//	tinyusb_config_cdcacm_t acm_cfg = { 0 }; 
+	//ESP_RETURN_ON_ERROR(tusb_cdc_acm_init(&acm_cfg),TAG,"Error on acm");
+	
+//	esp_tusb_init_console(TINYUSB_CDC_ACM_0); // log to usb
 
 	tinyusb_net_config_t net_config = {
 		// locally administrated address for the ncm device as it's going to be used internally

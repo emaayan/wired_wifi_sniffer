@@ -305,23 +305,16 @@ esp_err_t sniffer_frame_type_filter(uint32_t filter) {
 esp_err_t sniffer_frame_type(char result[]) {
 	wifi_promiscuous_filter_t filter = {0};
 	esp_err_t esp_err = esp_wifi_get_promiscuous_filter(&filter);
-	if (esp_err == ESP_OK) {
-		//	uint32_t all=WIFI_PROMIS_FILTER_MASK_ALL;
-		//	ESP_LOGI(TAG,"Frame type %"PRIu32 " %"PRIu32,filter.filter_mask ,all );
-		//	if(filter.filter_mask & WIFI_PROMIS_FILTER_MASK_ALL){
-		//		strncat(result, wifi_filter_hash_table[7].filter_name, MAX_RESULT_FRAME_LEN-strlen(result-1));
-		//	}else
-		{
-			for (int i = 0; i < SNIFFER_WLAN_FILTER_MAX; i++) {
-				if (filter.filter_mask & wifi_filter_hash_table[i].filter_val) {
-					size_t max = MAX_RESULT_FRAME_LEN - strlen(result) - 1;
-					if (strlen(result) > 0) {
-						strncat(result, ",", max);
-					}
-					strncat(result, wifi_filter_hash_table[i].filter_name, max);
+	if (esp_err == ESP_OK) {			
+		for (int i = 0; i < SNIFFER_WLAN_FILTER_MAX; i++) {
+			if (filter.filter_mask & wifi_filter_hash_table[i].filter_val) {
+				size_t max = MAX_RESULT_FRAME_LEN - strlen(result) - 1;
+				if (strlen(result) > 0) {
+					strncat(result, ",", max);
 				}
+				strncat(result, wifi_filter_hash_table[i].filter_name, max);
 			}
-		}
+		}		
 	}
 	return esp_err;
 }
@@ -374,6 +367,20 @@ static esp_err_t sniffer_load_mac_filter(char *mac, size_t *sz) {
 		}
 	}
 	return esp_err;
+}
+
+void tohex(addrFilter_t addrFilter, char *stringbuf, size_t sz) {
+	char *buf2 = stringbuf;
+	char *endofbuf = stringbuf + sz;
+	for (int i = 0; i < addrFilter.size; i++) {
+		/* i use 5 here since we are going to add at most 
+	       3 chars, need a space for the end '\n' and need
+	       a null terminator */
+		if (buf2 + 5 < endofbuf) {
+			buf2 += sprintf(buf2, "%02X", addrFilter.addr[i]);
+		}
+	}
+	buf2 += sprintf(buf2,"%s", "");
 }
 
 static int hex_to_decimal(char hexChar) {

@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
+
 
 #include "esp_app_desc.h"
 
@@ -48,7 +48,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
 
 	switch (event_id) {
 		case WIFI_EVENT_WIFI_READY: {
-			ESP_LOGI(TAG, "Wifi Ready");
+			ESP_LOGI(TAG, "Wi-fi Ready");
 			xEventGroupSetBits(s_wifi_event_group, WIFI_EVENT_IS_READY);
 			break;
 		}
@@ -234,7 +234,8 @@ static void init_filesystem(void) {
 	static wl_handle_t wl_handle;
 	const esp_vfs_fat_mount_config_t mount_config = {
 		.max_files = 4,
-		.format_if_mount_failed = true};
+		.format_if_mount_failed = true,
+	};
 	esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl(MOUNT_POINT, "storage", &mount_config, &wl_handle);
 	if (err != ESP_OK) {
 		ESP_LOGE(TAG, "Failed to mount FATFS (%s)", esp_err_to_name(err));
@@ -323,13 +324,19 @@ static void wired_send_failure() {
 	led_blink_fast();
 }
 
-#include <sys/time.h>
+static config_http_server_prm_t config_http_server_prm={0};
+
 void app_main(void) {
 	const esp_app_desc_t *esp_app_desc = esp_app_get_description();
-	ESP_LOGI(TAG, "[++++++] Starting Sniffer Version: %s", esp_app_desc->version);
+	
+	ESP_LOGI(TAG, "[++++++] Starting Sniffer Version: %s [++++++]",esp_app_desc->project_name);
 
 	init_nvs();
 	init_filesystem();
+	
+	init_console();
+	
+	
 	led_init_default();
 
 	init_wired_netif(wired_send_failure);
@@ -341,10 +348,9 @@ void app_main(void) {
 	init_tcp_server();
 
 	init_sniffer();
+	
+	snprintf(config_http_server_prm.rootdir,sizeof(config_http_server_prm.rootdir),"%s/",MOUNT_POINT);		
+	init_config_http_server(config_http_server_prm);
 
-	init_http_server();
-
-	init_console();
-
-	// set_time(1736795134237);
+	
 }
