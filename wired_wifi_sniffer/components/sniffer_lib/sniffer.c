@@ -1,36 +1,28 @@
+#include "sniffer.h"
 
-#include "argtable3/argtable3.h"
-#include "esp_check.h"
 #include "esp_console.h"
-#include "esp_err.h"
+#include "argtable3/argtable3.h"
+
+#include "esp_check.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
-#include "esp_wifi_types_generic.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
-#include "freertos/semphr.h"
-#include "freertos/task.h"
-#include <complex.h>
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/fcntl.h>
-#include <sys/unistd.h>
 
 #include "capture_lib.h"
 #include "nvs_lib.h"
+#include "utils_lib.h"
+
 #include "sdkconfig.h"
-#include "sniffer.h"
-#include "sys/errno.h"
-#include "tcp_server.h"
+static const char *TAG = "sniffer";
 
 #define SNIFFER_DEFAULT_MAC ""
 #define SNIFFER_DEFAULT_CHANNEL (1)
 #define SNIFFER_DEFAULT_RSSI (-70)
 #define SNIFFER_DEFAULT_FRAME_TYPE_FILTER WIFI_PROMIS_FILTER_MASK_ALL
-
-static const char *TAG = "sniffer";
 
 typedef struct {
 	char *filter_name;
@@ -38,7 +30,8 @@ typedef struct {
 } wlan_filter_table_t;
 
 typedef struct {
-	int sock;
+	bool run;
+	sniffer_write_cb_t sniffer_write_cb;
 	addrFilter_t addr2_filter;
 	int rssi_th;
 } sniffer_runtime_t;
@@ -68,22 +61,8 @@ uint32_t search_wifi_filter_hashtable(const char *key) {
 	return 0;
 }
 
-static esp_err_t sniff_packet_start(const int sock) {
-
-	esp_err_t ret = ESP_OK;
-	if (sock) {
-		pcap_hdr_t header = capture_create_header();
-		size_t real_write = onSend(sock, &header, sizeof(header));
-		if (!real_write) {
-			sniffer_stop(sock);
-			ret = ESP_ERR_INVALID_STATE;
-		}
-	} else {
-		ESP_LOGE(TAG, "No Socket");
-		ret = ESP_ERR_INVALID_STATE;
-	}
-
-	return ret;
+static bool sniffer_write(void *buffer, size_t len) {
+	return snf_rt.sniffer_write_cb(buffer, len); // onSend(sock, buffer, len);
 }
 
 static bool isAddrEquel(const uint8_t addr[], const addrFilter_t filter) {
@@ -156,41 +135,42 @@ static bool packet_mac_filter(wifi_promiscuous_pkt_type_t type, addrFilter_t add
 	return macFilter;
 }
 
-static esp_err_t packet_capture(wifi_promiscuous_pkt_type_t type, pcap_rec_t *pcap_rec, int sock) {
-	esp_err_t esp_err;
-	if (sock) {					
-		size_t real_write = 0;
-		real_write = onSend(sock, pcap_rec, sizeof(pcap_rec_t) - sizeof(pcap_rec->buf));
+static esp_err_t sniff_packet_start(pcap_hdr_t header) {
+	esp_err_t ret = ESP_OK;
+	size_t real_write = sniffer_write(&header, sizeof(header));
+	if (!real_write) {
+		sniffer_stop();
+		ret = ESP_ERR_INVALID_STATE;
+	}
+	return ret;
+}
+
+static esp_err_t sniffer_packet_capture(wifi_promiscuous_pkt_type_t type, pcap_rec_t *pcap_rec) {
+	esp_err_t esp_err = ESP_OK;
+	size_t real_write = 0;
+	real_write = sniffer_write(pcap_rec, sizeof(pcap_rec_t) - sizeof(pcap_rec->buf));
+	if (!real_write) {
+		esp_err = ESP_ERR_INVALID_STATE;
+	} else {
+		size_t sz = pcap_rec->pcap_rec_hdr.incl_len - pcap_rec->ieee80211_radiotap_header.it_len;
+		real_write = sniffer_write(pcap_rec->buf, sz);
 		if (!real_write) {
 			esp_err = ESP_ERR_INVALID_STATE;
 		} else {
-			size_t sz = pcap_rec->pcap_rec_hdr.incl_len - pcap_rec->ieee80211_radiotap_header.it_len;
-			real_write = onSend(sock, pcap_rec->buf, sz);
-			//   free(pcap_rec->buf);
-			if (!real_write) {
-				esp_err = ESP_ERR_INVALID_STATE;
-			} else {
-				esp_err = ESP_OK;
-			}
+			esp_err = ESP_OK;
 		}
-	} else {
-		ESP_LOGE(TAG, "No Socket");
-		esp_err = ESP_ERR_INVALID_STATE;
-		// sniffer_stop();
 	}
 	if (esp_err != ESP_OK) {
-		sniffer_stop(sock);
+		sniffer_stop();
 	}
 	return esp_err;
 }
-
-
 
 static struct timeval current_time = {
 	.tv_sec = 0,
 	0,
 };
-uint64_t timer = 0;
+static uint64_t timer = 0;
 uint64_t sniffer_get_time() {
 	return (uint64_t)current_time.tv_sec * 1000 + (uint64_t)current_time.tv_usec / 1000;
 }
@@ -203,7 +183,7 @@ struct timeval to_timeval(int64_t epoch) {
 }
 
 void sniffer_set_time(uint64_t t) {
-	current_time=to_timeval(t);	
+	current_time = to_timeval(t);
 	timer = esp_timer_get_time();
 }
 
@@ -213,20 +193,19 @@ static void wifi_sniffer_cb(void *recv_buf, wifi_promiscuous_pkt_type_t type) {
 	if (type != WIFI_PKT_MISC && !sniffer->rx_ctrl.rx_state && sniffer->rx_ctrl.rssi >= snf_rt.rssi_th) {
 		bool b = packet_mac_filter(type, snf_rt.addr2_filter, sniffer->payload);
 		if (b) {
-			pcap_rec_t pcap_rec = capture_create_pcap_record(sniffer);			
+			pcap_rec_t pcap_rec = capture_create_pcap_record(sniffer);
 			// int64_t ts_micro=sniffer->rx_ctrl.timestamp;//this is tied to when esp_wifi_start is called
-			struct timeval tt= to_timeval((esp_timer_get_time()-timer)/1000);
-			pcap_rec.pcap_rec_hdr.ts_sec=current_time.tv_sec+tt.tv_sec;
-			pcap_rec.pcap_rec_hdr.ts_usec=current_time.tv_usec+tt.tv_usec;
-			packet_capture(type, &pcap_rec, snf_rt.sock);
+			struct timeval tt = to_timeval((esp_timer_get_time() - timer) / 1000);
+			pcap_rec.pcap_rec_hdr.ts_sec = current_time.tv_sec + tt.tv_sec;
+			pcap_rec.pcap_rec_hdr.ts_usec = current_time.tv_usec + tt.tv_usec;
+			sniffer_packet_capture(type, &pcap_rec);
 		}
 	}
 }
 
-esp_err_t sniffer_stop(int sock) {
-	disconnect_socket(sock);
-	snf_rt.sock = 0;
-	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_promiscuous(false));
+esp_err_t sniffer_stop() {
+	snf_rt.run = false;
+	ESP_ERROR_RETURN(esp_wifi_set_promiscuous(snf_rt.run), TAG, "");
 	ESP_LOGD(TAG, "stop promiscuous ok");
 	return ESP_OK;
 }
@@ -237,6 +216,7 @@ esp_err_t sniffer_load_rssi_filter(int32_t *rssi) {
 	esp_err_t esp_err = nvs_get_num32i(NS, RSSI_FILTER_KEY, rssi, SNIFFER_DEFAULT_RSSI);
 	return esp_err;
 }
+
 esp_err_t sniffer_save_rssi_filter(int value) {
 	int32_t prev_value = 0;
 	if (sniffer_load_rssi_filter(&prev_value) == ESP_OK) {
@@ -251,6 +231,7 @@ esp_err_t sniffer_save_rssi_filter(int value) {
 		return nvs_set_num32i(NS, RSSI_FILTER_KEY, value);
 	}
 }
+
 void sniffer_rssi_filter(int rssi) {
 	snf_rt.rssi_th = rssi;
 	sniffer_save_rssi_filter(rssi);
@@ -291,13 +272,13 @@ static esp_err_t sniffer_save_frame_type_filter(const uint32_t value) {
 esp_err_t sniffer_frame_type_filter(uint32_t filter) {
 
 	wifi_promiscuous_filter_t wifi_filter = {.filter_mask = filter};
-	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_promiscuous_filter(&wifi_filter));
+	ESP_ERROR_RETURN(esp_wifi_set_promiscuous_filter(&wifi_filter), TAG, "");
 	ESP_LOGI(TAG, "Frame Filter %" PRIu32, wifi_filter.filter_mask);
 
-	wifi_promiscuous_filter_t wifi_promiscuous_filter = {.filter_mask = (filter & WIFI_PROMIS_FILTER_MASK_CTRL) ? WIFI_PROMIS_CTRL_FILTER_MASK_ALL : 0};
-	ESP_LOGI(TAG, "Frame Control Filter %" PRIu32, wifi_promiscuous_filter.filter_mask);
+	wifi_promiscuous_filter_t wifi_promiscuous_ctrl_filter = {.filter_mask = (filter & WIFI_PROMIS_FILTER_MASK_CTRL) ? WIFI_PROMIS_CTRL_FILTER_MASK_ALL : 0};
+	ESP_ERROR_RETURN(esp_wifi_set_promiscuous_ctrl_filter(&wifi_promiscuous_ctrl_filter), TAG, "");
+	ESP_LOGI(TAG, "Frame Control Filter %" PRIu32, wifi_promiscuous_ctrl_filter.filter_mask);
 
-	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_promiscuous_ctrl_filter(&wifi_promiscuous_filter));
 	sniffer_save_frame_type_filter(filter);
 	return ESP_OK;
 }
@@ -305,7 +286,7 @@ esp_err_t sniffer_frame_type_filter(uint32_t filter) {
 esp_err_t sniffer_frame_type(char result[]) {
 	wifi_promiscuous_filter_t filter = {0};
 	esp_err_t esp_err = esp_wifi_get_promiscuous_filter(&filter);
-	if (esp_err == ESP_OK) {			
+	if (esp_err == ESP_OK) {
 		for (int i = 0; i < SNIFFER_WLAN_FILTER_MAX; i++) {
 			if (filter.filter_mask & wifi_filter_hash_table[i].filter_val) {
 				size_t max = MAX_RESULT_FRAME_LEN - strlen(result) - 1;
@@ -314,7 +295,7 @@ esp_err_t sniffer_frame_type(char result[]) {
 				}
 				strncat(result, wifi_filter_hash_table[i].filter_name, max);
 			}
-		}		
+		}
 	}
 	return esp_err;
 }
@@ -342,7 +323,7 @@ static esp_err_t sniffer_save_channel_filter(const uint32_t value) {
 }
 
 esp_err_t sniffer_channel_filter(uint32_t channel) {
-	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE));
+	ESP_ERROR_RETURN(esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE), TAG, "");
 	sniffer_save_channel_filter(channel);
 	return ESP_OK;
 }
@@ -373,14 +354,14 @@ void tohex(addrFilter_t addrFilter, char *stringbuf, size_t sz) {
 	char *buf2 = stringbuf;
 	char *endofbuf = stringbuf + sz;
 	for (int i = 0; i < addrFilter.size; i++) {
-		/* i use 5 here since we are going to add at most 
-	       3 chars, need a space for the end '\n' and need
-	       a null terminator */
+		/* i use 5 here since we are going to add at most
+		   3 chars, need a space for the end '\n' and need
+		   a null terminator */
 		if (buf2 + 5 < endofbuf) {
 			buf2 += sprintf(buf2, "%02X", addrFilter.addr[i]);
 		}
 	}
-	buf2 += sprintf(buf2,"%s", "");
+	buf2 += sprintf(buf2, "%s", "");
 }
 
 static int hex_to_decimal(char hexChar) {
@@ -409,7 +390,6 @@ static int hex_to_byte_array(const char *hexArray, size_t hexLength, uint8_t byt
 	}
 	return i;
 }
-
 
 static esp_err_t sniffer_save_mac_filter(const char *value) {
 	char *prev_value = "";
@@ -472,6 +452,7 @@ static void sniffer_set_channel_filter() {
 	sniffer_load_channel_filter(&value);
 	sniffer_channel_filter(value);
 }
+
 static void sniffer_set_rssi_filter() {
 	int32_t value = SNIFFER_DEFAULT_RSSI;
 	sniffer_load_rssi_filter(&value);
@@ -492,26 +473,31 @@ static void sniffer_set_mac_filter() {
 	sniffer_filter_mac(value, sz);
 }
 
-esp_err_t sniffer_start(int sock) {
-	esp_err_t ret = ESP_OK;
-	snf_rt.sock = sock;
-	ESP_ERROR_CHECK_WITHOUT_ABORT(sniff_packet_start(sock));
+static void sniffer_set_filters() {
 	sniffer_set_rssi_filter();
 	sniffer_set_frame_type_filter();
 	sniffer_set_mac_filter();
 	sniffer_set_channel_filter();
-
-	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_promiscuous(true));
-	ESP_LOGD(TAG, "start WiFi promiscuous ok");
-	return ret;
 }
 
-void init_sniffer() {
-	ESP_ERROR_CHECK(esp_wifi_set_promiscuous_rx_cb(wifi_sniffer_cb));
-	sniffer_set_rssi_filter();
-	sniffer_set_frame_type_filter();
-	sniffer_set_mac_filter();
-	sniffer_set_channel_filter();
+esp_err_t sniffer_start() {
+	snf_rt.run = true;
+	pcap_hdr_t header = capture_create_header();
+	ESP_ERROR_RETURN(sniff_packet_start(header), TAG, "");
+
+	sniffer_set_filters();
+
+	ESP_ERROR_RETURN(esp_wifi_set_promiscuous(snf_rt.run), TAG, "");
+	ESP_LOGD(TAG, "start WiFi promiscuous ok");
+	return ESP_OK;
+}
+
+void init_sniffer(sniffer_write_cb_t sniffer_write_cb) {
+	snf_rt.sniffer_write_cb = sniffer_write_cb;
+
+	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_promiscuous_rx_cb(wifi_sniffer_cb));
+
+	sniffer_set_filters();
 }
 
 static void printfln(const char *fmt, ...) {

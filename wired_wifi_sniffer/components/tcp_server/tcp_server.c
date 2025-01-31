@@ -2,16 +2,13 @@
 
 #include "esp_log.h"
 #include "lwip/err.h"
-#include "lwip/netdb.h"
-#include "lwip/sys.h"
-#include "lwip/tcp.h"
-#include "sys/errno.h" //contains the actuall description of errorcodes
+// #include "sys/errno.h" //contains the actuall description of errorcodes
 
-#include "../../build/config/sdkconfig.h"
+#include "sdkconfig.h"
+static const char *TAG = "TcpServer";
+
 
 #define RX_BUFFER_SIZE 256
-
-static const char *TAG = "TcpServer";
 // https://docs.espressif.com/projects/esp-idf/en/v5.0.1/esp32/api-guides/lwip.html?highlight=shutdown#socket-error-handling
 // https://esp32developer.com/programming-in-c-c/tcp-ip/tcp-server
 

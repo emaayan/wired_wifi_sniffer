@@ -1,19 +1,11 @@
+#include "usb_ncm_iface.h"
+
 #include <stdint.h>
 #include <stdio.h>
-#include <sys/types.h>
 
-#include "esp_system.h"
-
-#include "esp_err.h"
-#include "esp_event.h"
 #include "esp_log.h"
 #include "esp_mac.h"
-#include "esp_netif.h"
-#include "esp_netif_ip_addr.h"
-
-#include "lwip/esp_netif_net_stack.h"
-#include "lwip/ip4_addr.h"
-#include "lwip/ip_addr.h"
+#include "esp_check.h"
 
 #include "tinyusb.h"
 #include "tinyusb_net.h"
@@ -23,10 +15,10 @@
 
 #include "nvs_lib.h"
 
-#include "argtable3/argtable3.h"
 #include "esp_console.h"
+#include "argtable3/argtable3.h"
 
-#include "usb_ncm_iface.h"
+#include "utils_lib.h"
 
 static const char *TAG = "usb_ncm_iface";
 #ifdef CONFIG_TINYUSB_NET_MODE_RNDIS
@@ -67,24 +59,14 @@ static esp_err_t tinyusb_netif_recv_cb(void *buffer, uint16_t len, void *ctx) {
 	}
 	return ESP_OK;
 }
-//#include "tusb_console.h"
-//#include "tusb_cdc_acm.h"
-//#include "esp_check.h"
+
 static esp_err_t create_usb_eth_if(esp_netif_t *s_netif, tusb_net_rx_cb_t tusb_net_rx_cb, tusb_net_free_tx_cb_t tusb_net_free_tx_cb) {
 	const tinyusb_config_t tusb_cfg = {
 		.external_phy = false,
 	};
 
-
-	
 	ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
 	
-	
-//	tinyusb_config_cdcacm_t acm_cfg = { 0 }; 
-	//ESP_RETURN_ON_ERROR(tusb_cdc_acm_init(&acm_cfg),TAG,"Error on acm");
-	
-//	esp_tusb_init_console(TINYUSB_CDC_ACM_0); // log to usb
-
 	tinyusb_net_config_t net_config = {
 		// locally administrated address for the ncm device as it's going to be used internally
 		.mac_addr = {0},
@@ -109,9 +91,9 @@ static void netif_l2_free_cb(void *h, void *buffer) {
 #define TUSB_SEND_TO 50
 static esp_err_t ether2usb_transmit_cb(void *h, void *buffer, size_t len) {
 
-	 #ifdef LOG_PAYLOAD
-		ESP_LOG_BUFFER_HEX("Ethernet->USB", buffer, len);
-	#endif
+#ifdef LOG_PAYLOAD
+	ESP_LOG_BUFFER_HEX("Ethernet->USB", buffer, len);
+#endif
 	esp_err_t esp_err = tinyusb_net_send_sync(buffer, len, NULL, pdMS_TO_TICKS(TUSB_SEND_TO));
 	if (esp_err != ESP_OK) {
 		switch (esp_err) {
@@ -213,13 +195,11 @@ static esp_err_t create_virtual_net_if(esp_netif_t **res_s_netif) {
 
 	// 1) Derive the base config (very similar to IDF's default WiFi AP with DHCP server)
 	esp_netif_inherent_config_t base_cfg = {
-		.flags = ESP_NETIF_DHCP_SERVER |
-				 ESP_NETIF_FLAG_AUTOUP,
+		.flags = ESP_NETIF_DHCP_SERVER | ESP_NETIF_FLAG_AUTOUP,
 		.ip_info = &esp_netif_soft_ap_ip,
 		.if_key = "wired",
 		.if_desc = "USB NCM sniffer device",
-		.route_prio = 10
-
+		.route_prio = 10,
 	};
 
 	// 2) Use static config for driver's config pointing only to static transmit and free functions
@@ -227,7 +207,6 @@ static esp_err_t create_virtual_net_if(esp_netif_t **res_s_netif) {
 		.handle = (void *)1,					  // not using an instance, USB-NCM is a static singleton (must be != NULL)
 		.transmit = ether2usb_transmit_cb,		  // point to static Tx function
 		.driver_free_rx_buffer = netif_l2_free_cb // point to Free Rx buffer function
-
 	};
 
 	// 3) USB-NCM is an Ethernet netif from lwip perspective, we already have IO definitions for that:
@@ -250,13 +229,13 @@ static esp_err_t create_virtual_net_if(esp_netif_t **res_s_netif) {
 	}
 
 	uint8_t lwip_addr[6] = {0};
-	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_base_mac_addr_get(lwip_addr));
-	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_set_mac(s_netif, lwip_addr));
+	ESP_ERROR_RETURN(esp_base_mac_addr_get(lwip_addr),TAG,"");
+	ESP_ERROR_RETURN(esp_netif_set_mac(s_netif, lwip_addr),TAG,"");
 
 	uint32_t lease_opt = 10000; // set the minimum lease time
-	esp_netif_dhcps_option(s_netif, ESP_NETIF_OP_SET, IP_ADDRESS_LEASE_TIME, &lease_opt, sizeof(lease_opt));
+	ESP_ERROR_RETURN(esp_netif_dhcps_option(s_netif, ESP_NETIF_OP_SET, IP_ADDRESS_LEASE_TIME, &lease_opt, sizeof(lease_opt)),TAG,"");
 	// start the interface manually (as the driver has been started already)
-	esp_netif_action_start(s_netif, 0, 0, 0);
+	esp_netif_action_start(s_netif, 0, 0, 0); 
 	*res_s_netif = s_netif;
 
 	return ESP_OK;
@@ -284,8 +263,8 @@ esp_netif_t *get_if() {
 esp_err_t init_wired_netif(wired_send_failure_cb wired_send_failure) {
 
 	_wired_send_failure_cb = wired_send_failure;
-	ESP_ERROR_CHECK(create_virtual_net_if(&g_s_netif));
-	ESP_ERROR_CHECK(create_usb_eth_if(g_s_netif, tinyusb_netif_recv_cb, tinyusb_netif_free_buffer_cb));
+	ESP_RETURN_ON_ERROR(create_virtual_net_if(&g_s_netif),TAG,"Problem creating virutal if");
+	ESP_RETURN_ON_ERROR(create_usb_eth_if(g_s_netif, tinyusb_netif_recv_cb, tinyusb_netif_free_buffer_cb),TAG,"Problem creating virutal if");
 	return ESP_OK;
 }
 
@@ -310,7 +289,7 @@ static int do_iface_cmd(int argc, char **argv) {
 	return 0;
 }
 
-void register_iface_cmd(void) {
+esp_err_t register_iface_cmd(void) {
 	iface_args.ip = arg_str0("i", "ip", "<ip_address>", "ip of internal iface (to set wireshark to listen to, will cause restart)");
 	iface_args.end = arg_end(1);
 	const esp_console_cmd_t iface_cmd = {
@@ -320,5 +299,5 @@ void register_iface_cmd(void) {
 		.func = &do_iface_cmd,
 		.argtable = &iface_args,
 	};
-	ESP_ERROR_CHECK(esp_console_cmd_register(&iface_cmd));
+	return  esp_console_cmd_register(&iface_cmd);
 }

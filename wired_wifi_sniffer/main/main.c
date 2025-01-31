@@ -4,218 +4,57 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 #include "esp_app_desc.h"
 
-#include "lwip/ip4_addr.h"
-
-#include "argtable3/argtable3.h"
-#include "linenoise/linenoise.h"
-#include "sdkconfig.h"
-
+#include "esp_check.h"
 #include "esp_console.h"
-#include "esp_err.h"
-#include "esp_event.h"
+#include "linenoise/linenoise.h"
+
+
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
-#include "esp_wifi.h"
-#include "esp_wifi_types_generic.h"
-#include "nvs_flash.h"
+#include "esp_mac.h"
 
 #include "config_http_server.h"
-#include "esp_mac.h"
+#include "utils_lib.h"
 #include "led_common.h"
 #include "nvs_lib.h"
 #include "sniffer.h"
 #include "tcp_server.h"
+#include "wifi_lib.h"
 #include "usb_ncm_iface.h"
-#include "xtensa/config/specreg.h"
+
+
+#include "sdkconfig.h"
+static const char *TAG = "main";
+
 
 #define MOUNT_POINT "/data"
 #define HISTORY_FILE_PATH MOUNT_POINT "/history.txt"
 
-static const char *TAG = "main";
-
-#define WIFI_EVENT_AP_START_BIT BIT0
-#define WIFI_EVENT_STA_CONNECTED_BIT BIT1
-#define WIFI_EVENT_STA_DISCONNECTED_BIT BIT2
-#define WIFI_EVENT_STA_START_BIT BIT3
-#define WIFI_EVENT_AP_STOP_BIT BIT4
-#define WIFI_EVENT_STA_STOP_BIT BIT5
-#define WIFI_EVENT_IS_READY BIT10
-static EventGroupHandle_t s_wifi_event_group;
-static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
-
-	switch (event_id) {
-		case WIFI_EVENT_WIFI_READY: {
-			ESP_LOGI(TAG, "Wi-fi Ready");
-			xEventGroupSetBits(s_wifi_event_group, WIFI_EVENT_IS_READY);
-			break;
-		}
-		case WIFI_EVENT_STA_START: {
-			ESP_LOGI(TAG, "STA Started");
-			xEventGroupSetBits(s_wifi_event_group, WIFI_EVENT_STA_START_BIT);
-			break;
-		}
-		case WIFI_EVENT_STA_STOP: {
-			ESP_LOGI(TAG, "STA Stopped");
-			xEventGroupSetBits(s_wifi_event_group, WIFI_EVENT_STA_STOP_BIT);
-			break;
-		}
-		case WIFI_EVENT_AP_START: {
-			ESP_LOGI(TAG, "Started soft AP");
-			xEventGroupSetBits(s_wifi_event_group, WIFI_EVENT_AP_START_BIT);
-			break;
-		}
-		case WIFI_EVENT_AP_STOP: {
-			ESP_LOGI(TAG, "Stopped Soft AP");
-			xEventGroupSetBits(s_wifi_event_group, WIFI_EVENT_AP_STOP_BIT);
-			break;
-		}
-		case WIFI_EVENT_AP_STACONNECTED: {
-			wifi_event_ap_staconnected_t *event = (wifi_event_ap_staconnected_t *)event_data;
-			ESP_LOGI(TAG, "station " MACSTR " join, AID=%d", MAC2STR(event->mac), event->aid);
-			break;
-		}
-		case WIFI_EVENT_AP_STADISCONNECTED: {
-			wifi_event_ap_stadisconnected_t *event = (wifi_event_ap_stadisconnected_t *)event_data;
-			ESP_LOGI(TAG, "station " MACSTR " leave, AID=%d", MAC2STR(event->mac), event->aid);
-			break;
-		}
-		case WIFI_EVENT_STA_CONNECTED: {
-			wifi_event_sta_connected_t *wifi_event_sta_connected = (wifi_event_sta_connected_t *)event_data;
-			ESP_LOGI(TAG, "Connected STA to %s on channel %d", wifi_event_sta_connected->ssid, wifi_event_sta_connected->channel);
-			xEventGroupSetBits(s_wifi_event_group, WIFI_EVENT_STA_CONNECTED_BIT);
-			break;
-		}
-		case WIFI_EVENT_STA_DISCONNECTED: {
-			wifi_event_sta_disconnected_t *wifi_event_sta_disconnected = (wifi_event_sta_disconnected_t *)event_data;
-			ESP_LOGI(TAG, "Disconnected From %s with rssi %d ,due to: %d", wifi_event_sta_disconnected->ssid, wifi_event_sta_disconnected->rssi, wifi_event_sta_disconnected->reason);
-			// esp_wifi_connect();
-			// s_retry_num++;
-			xEventGroupSetBits(s_wifi_event_group, WIFI_EVENT_STA_DISCONNECTED_BIT);
-			break;
-		}
-		case WIFI_EVENT_STA_BEACON_TIMEOUT: {
-			ESP_LOGW(TAG, "STA Beacon timeout");
-			break;
-		}
-		case WIFI_EVENT_HOME_CHANNEL_CHANGE: {
-			ESP_LOGI(TAG, "Channel changed");
-			break;
-		}
-		default:
-			ESP_LOGI(TAG, "STA Event %" PRIu32, event_id);
-			break;
-	}
-}
-
-#define IP_EVENT_STA_GOT_IP_BIT BIT0
-#define IP_EVENT_AP_STAIPASSIGNED_BIT BIT1
-#define IP_EVENT_STA_LOST_IP_BIT BIT2
-static EventGroupHandle_t s_ip_event_group;
-static void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
-	int8_t power = 0;
-	switch (event_id) {
-
-		case IP_EVENT_STA_GOT_IP: {
-			// s_retry_num = 0;
-			ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
-			// wifi_lib_post_event(WIFI_LIB_GOT_IP);
-			ESP_LOGI(TAG, "IP:" IPSTR, IP2STR(&event->ip_info.ip));
-			ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_get_max_tx_power(&power));
-			ESP_LOGI(TAG, "Max TX Power: %d", power);
-			xEventGroupSetBits(s_ip_event_group, IP_EVENT_STA_GOT_IP_BIT);
-			break;
-		}
-		case IP_EVENT_AP_STAIPASSIGNED: {
-			ip_event_ap_staipassigned_t *event = (ip_event_ap_staipassigned_t *)event_data;
-			led_blink_slow();
-			led_blink_slow();
-			ESP_LOGI(TAG, "IP assigned :" IPSTR, IP2STR(&event->ip));
-			ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_get_max_tx_power(&power));
-			ESP_LOGI(TAG, "Max TX Power: %d", power);
-			xEventGroupSetBits(s_ip_event_group, IP_EVENT_AP_STAIPASSIGNED_BIT);
-			break;
-		}
-		case IP_EVENT_STA_LOST_IP: {
-			ESP_LOGW(TAG, "station lost IP and the IP is reset to 0");
-			xEventGroupSetBits(s_ip_event_group, IP_EVENT_STA_LOST_IP_BIT);
-			break;
-		}
-		default:
-			ESP_LOGI(TAG, "IP Event %" PRIu32, event_id);
-			break;
-	}
-}
-
-static void init_wifi(void) {
-	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_event_loop_create_default());
-
-	s_wifi_event_group = xEventGroupCreate();
-	esp_event_handler_instance_t instance_any_id;
-	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, &instance_any_id));
-
-	s_ip_event_group = xEventGroupCreate();
-	esp_event_handler_instance_t instance_got_ip;
-	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_event_handler_instance_register(IP_EVENT, ESP_EVENT_ANY_ID, &ip_event_handler, NULL, &instance_got_ip));
-
-	wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_init(&cfg));
-	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_mode(WIFI_MODE_NULL));
-	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_ps(WIFI_PS_NONE)); // for timestamp setting
-	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_init());
-
-	esp_wifi_start();
-	ESP_LOGI(TAG, "Waiting for IP, the card must be connected to the other USB port, for the CLI to work");
-	EventBits_t bits = xEventGroupWaitBits(s_ip_event_group, IP_EVENT_AP_STAIPASSIGNED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
-	if (bits & IP_EVENT_AP_STAIPASSIGNED_BIT) {
-		ESP_LOGD(TAG, "Got IP");
-	}
-}
-
-/*
-typedef struct
-{
-	int sock;
-} sender_config_t ;
-
-static void sender(void *pvParameters)
-{
-	sender_config_t *st=pvParameters;
-	int sock=st->sock;
-	ESP_LOGI(TAG,"Starting to send");
-	bool b=true;
-
-	while(b){
-
-		 char buffer[1400]="";
-		 int max=sizeof(buffer)-1 ;
-		 int min=20;
-		 int rd_num = rand() % (max - min + 1) + min;
-		 size_t sz=rd_num;//sizeof(buffer);
-	//	 sz=512;
-	//	 ESP_LOGI(TAG,"Size: %d",rd_num);
-		 b=onSend(sock, &sz, sizeof(sz));
-		 if (b)     {
-			memset(buffer, 't', sz);
-			b=onSend(sock, buffer, sz);
-		 }
-		 vTaskDelay(pdMS_TO_TICKS(30));
-	}
-	ESP_LOGI(TAG,"Stopped");
-	vTaskDelete(NULL);
-}
- */
-// static sender_config_t st={.sock=0};
+static int _sock = 0;
 static void on_socket_accept_handler(const int sock, struct sockaddr_in *so_in) {
-	// st.sock=sock;
-	// xTaskCreate(sender, "sender", configMINIMAL_STACK_SIZE *6, &st, configMAX_PRIORITIES - 4, NULL);
-	sniffer_start(sock);
+	_sock = sock;
+	sniffer_start();
 }
 
-#define PORT 19000
+static bool on_sniffer_write(void *buffer, size_t len) {
+	if (_sock) {
+		if (onSend(_sock, buffer, len)) {
+			return true;
+		} else {
+			sniffer_stop();
+			disconnect_socket(_sock);
+			_sock = 0;			
+			return false;
+		}
+	} else {
+		sniffer_stop();			
+		return false;
+	}
+}
+
+#define PORT 19000 // wireshark default port for pipes
 #define KEEPALIVE_IDLE 5	 // CONFIG_TCP_SERVER_KEEPALIVE_IDLE
 #define KEEPALIVE_INTERVAL 5 // CONFIG_TCP_SERVER_KEEPALIVE_INTERVAL
 #define KEEPALIVE_COUNT 3	 // CONFIG_TCP_SERVER_KEEPALIVE_COUNT
@@ -225,7 +64,7 @@ static void init_tcp_server() {
 		.keepIdle = KEEPALIVE_IDLE,
 		.keepInterval = KEEPALIVE_INTERVAL,
 		.keepCount = KEEPALIVE_COUNT,
-		.on_socket_accept = on_socket_accept_handler,
+		.on_socket_accept = on_socket_accept_handler, 
 	};
 	start_tcp_server(&tcp_server_config);
 }
@@ -287,70 +126,78 @@ void init_console() {
 static char *generate_hostname(void) {
 	uint8_t mac[6];
 	char *hostname;
-	esp_read_mac(mac, ESP_MAC_WIFI_STA);
+	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_read_mac(mac, ESP_MAC_WIFI_STA));
 	if (-1 == asprintf(&hostname, "%s-%02X%02X%02X", "sniffer", mac[3], mac[4], mac[5])) {
 		abort();
 	}
 	return hostname;
 }
 
-static void init_mdns(esp_netif_t *netif) {
+static esp_err_t init_mdns(esp_netif_t *netif) {
 	char *hostname = generate_hostname();
 
 	// initialize mDNS
-	ESP_ERROR_CHECK(mdns_init());
+	ESP_ERROR_RETURN(mdns_init(), TAG, "");
 	// set mDNS hostname (required if you want to advertise services)
-	ESP_ERROR_CHECK(mdns_hostname_set(hostname));
+	ESP_ERROR_RETURN(mdns_hostname_set(hostname), TAG, "");
 	ESP_LOGI(TAG, "mdns hostname set to: [%s]", hostname);
 	// set default mDNS instance name
-	ESP_ERROR_CHECK(mdns_instance_name_set("ESP32 with mDNS"));
+	ESP_ERROR_RETURN(mdns_instance_name_set("ESP32 with mDNS"), TAG, "");
 
 	// initialize service
-	ESP_ERROR_CHECK(mdns_service_add("ESP32-WebServer", "_http", "_tcp", 80, NULL, 0));
-	ESP_ERROR_CHECK(mdns_service_subtype_add_for_host("ESP32-WebServer", "_http", "_tcp", NULL, "_server"));
+	ESP_ERROR_RETURN(mdns_service_add("ESP32-WebServer", "_http", "_tcp", 80, NULL, 0), TAG, "");
+	ESP_ERROR_RETURN(mdns_service_subtype_add_for_host("ESP32-WebServer", "_http", "_tcp", NULL, "_server"), TAG, "");
 
-	ESP_ERROR_CHECK(mdns_register_netif(netif));
+	ESP_ERROR_RETURN(mdns_register_netif(netif), TAG, "");
 	/* It is not enough to just register the interface, we have to enable is manually.
 	 * This is typically performed in "GOT_IP" event handler, but we call it here directly
 	 * since the `EXAMPLE_INTERFACE` netif is connected already, to keep the example simple.
 	 */
-	ESP_ERROR_CHECK(mdns_netif_action(netif, MDNS_EVENT_ENABLE_IP4));
-	ESP_ERROR_CHECK(mdns_netif_action(netif, MDNS_EVENT_ANNOUNCE_IP4));
+	ESP_ERROR_RETURN(mdns_netif_action(netif, MDNS_EVENT_ENABLE_IP4), TAG, "");
+	ESP_ERROR_RETURN(mdns_netif_action(netif, MDNS_EVENT_ANNOUNCE_IP4), TAG, "");
 
-	free(hostname);
+	free(hostname); // PROBLEM in event error return
+	return ESP_OK;
 }
 
 static void wired_send_failure() {
 	led_blink_fast();
 }
 
-static config_http_server_prm_t config_http_server_prm={0};
+void on_wifi_lib_event(int32_t event_id, void *event_data) {
+	switch (event_id) {
+		case WIFI_LIB_GOT_IP:
+			led_blink_slow();
+			led_blink_slow();
+			break;
+	}
+}
+
+static config_http_server_prm_t config_http_server_prm = {0};
+static wifi_lib_cfg_t wifi_lib_cfg = {.event_handler = on_wifi_lib_event};
 
 void app_main(void) {
 	const esp_app_desc_t *esp_app_desc = esp_app_get_description();
-	
-	ESP_LOGI(TAG, "[++++++] Starting Sniffer Version: %s [++++++]",esp_app_desc->project_name);
+
+	ESP_LOGI(TAG, "[++++++] Starting Sniffer Version: %s [++++++]", esp_app_desc->project_name);
 
 	init_nvs();
 	init_filesystem();
-	
+
 	init_console();
-	
-	
+
 	led_init_default();
 
 	init_wired_netif(wired_send_failure);
-	init_wifi();
+	ESP_RETURN_VOID_ON_ERROR(init_wifi(wifi_lib_cfg), TAG, "Error init WI-Fi");
 
 	esp_netif_t *netif = get_if();
-	init_mdns(netif);
+	ESP_RETURN_VOID_ON_ERROR(init_mdns(netif), TAG, "Error init mdns");
 
 	init_tcp_server();
 
-	init_sniffer();
-	
-	snprintf(config_http_server_prm.rootdir,sizeof(config_http_server_prm.rootdir),"%s/",MOUNT_POINT);		
-	init_config_http_server(config_http_server_prm);
+	init_sniffer(on_sniffer_write);
 
-	
+	snprintf(config_http_server_prm.rootdir, sizeof(config_http_server_prm.rootdir), "%s/", MOUNT_POINT);
+	init_config_http_server(config_http_server_prm);
 }

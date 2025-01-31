@@ -2,11 +2,10 @@
 
 #include "esp_vfs.h"
 #include "esp_check.h"
-#include "esp_err.h"
 #include "esp_http_server.h"
 #include "esp_app_desc.h"
+#include "esp_log.h"
 
-#include <complex.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,11 +15,12 @@
 #include "sniffer.h"
 #include "cJSON.h"
 
-static const char *TAG = "config_http_server";
+
 #define CONFIG_HTTP_QUERY_KEY_MAX_LEN (64)
 #define FILE_PATH_MAX (ESP_VFS_PATH_MAX + 128)
 #define SCRATCH_BUFSIZE (256)
 
+static const char *TAG = "config_http_server";
 
 static config_http_server_prm_t _config_http_server_prm;
 static httpd_handle_t server;

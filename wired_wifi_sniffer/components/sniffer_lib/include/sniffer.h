@@ -1,14 +1,10 @@
-/* cmd_sniffer example — declarations of command registration functions.
+#ifndef SNIFFER_H
+#define SNIFFER_H
 
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
 
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
-*/
-#pragma once
-
-#include "esp_eth_driver.h"
+#include <stdint.h>
+#include "esp_err.h"
+#include "stdbool.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -174,10 +170,12 @@ typedef enum {
 	SNIFFER_WLAN_FILTER_MAX
 } sniffer_wlan_filter_t;
 
-void init_sniffer();
+typedef bool (*sniffer_write_cb_t)(void *buffer, size_t len);
+void init_sniffer(sniffer_write_cb_t sniffer_write_cb);
+
 void register_sniffer_cmd(void);
-esp_err_t sniffer_start(int sock);
-esp_err_t sniffer_stop(int sock);
+esp_err_t sniffer_start();
+esp_err_t sniffer_stop();
 
 esp_err_t sniffer_channel_filter(uint32_t channel);
 uint32_t sniffer_channel();
@@ -211,4 +209,6 @@ void sniffer_set_time(uint64_t t);
 uint64_t sniffer_get_time();
 #ifdef __cplusplus
 }
+#endif
+
 #endif
