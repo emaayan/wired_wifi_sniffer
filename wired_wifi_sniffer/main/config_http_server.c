@@ -1,5 +1,6 @@
 #include <config_http_server.h>
 
+#include "esp_err.h"
 #include "esp_vfs.h"
 #include "esp_check.h"
 #include "esp_http_server.h"
@@ -14,7 +15,7 @@
 
 #include "sniffer.h"
 #include "cJSON.h"
-
+#include "utils_lib.h"
 
 #define CONFIG_HTTP_QUERY_KEY_MAX_LEN (64)
 #define FILE_PATH_MAX (ESP_VFS_PATH_MAX + 128)
@@ -44,7 +45,7 @@ static esp_err_t index_get_handler(httpd_req_t *req) {
 	int fd = open(filepath, O_RDONLY, 0);
 	if (fd == -1) {
 		ESP_LOGE(TAG, "Failed to open file : %s", filepath);
-		httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read existing file");
+		ESP_ERROR_RETURN(httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read existing file"),TAG,"");
 		return ESP_FAIL;
 	}
 	char chunk[SCRATCH_BUFSIZE] = {}; ////( char*) req->user_ctx;
@@ -86,21 +87,6 @@ static const httpd_uri_t index_page = {
 	.handler = index_get_handler,
 	.user_ctx = "",
 };
-
-int parseInt(const char *s, int *i) {
-	char *ep;
-	long l;
-
-	l = strtol(s, &ep, 0);
-
-	if (*ep != 0) {
-		return 0;
-	}
-
-	*i = (int)l;
-	return 1;
-}
-
 
 
 
@@ -188,6 +174,16 @@ static const httpd_uri_t favicon = {
 	.user_ctx = NULL,
 };
 
+static int  parseInt(const char *s, int *i) {
+	char *ep;
+	long l = strtol(s, &ep, 0);
+	if (*ep != 0) {
+		return 0;
+	}
+	*i = (int)l;
+	return 1;
+}
+
 static esp_err_t filter_get_handler(httpd_req_t *req) {
 	char *buf;
 	size_t buf_len;
@@ -214,8 +210,7 @@ static esp_err_t filter_get_handler(httpd_req_t *req) {
 		if (httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
 			ESP_LOGD(TAG, "Found URL query %s", buf);
 			char param[CONFIG_HTTP_QUERY_KEY_MAX_LEN] = {0};
-			// char dec_param[CONFIG_HTTP_QUERY_KEY_MAX_LEN] = {0};
-
+					
 			if (httpd_query_key_value(buf, "frame", param, sizeof(param)) == ESP_OK) {
 				ESP_LOGD(TAG, "Found URL query parameter: frame=%s", param);
 				char *end, *r, *tok;
@@ -236,6 +231,7 @@ static esp_err_t filter_get_handler(httpd_req_t *req) {
 				}
 				free(r);
 			}
+			
 			if (httpd_query_key_value(buf, "channel", param, sizeof(param)) == ESP_OK) {
 				ESP_LOGD(TAG, "Found URL query parameter: channel=%s", param);
 				int ch = 0;

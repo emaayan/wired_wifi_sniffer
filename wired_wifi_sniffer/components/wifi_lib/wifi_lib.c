@@ -173,10 +173,11 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t eve
 	}
 }
 
+
 esp_err_t init_wifi(wifi_lib_cfg_t wifi_lib_cfg) {
 	_wifi_lib_cfg = wifi_lib_cfg;
 	ESP_ERROR_CHECK_WITHOUT_ABORT(esp_event_loop_create_default());
-
+	
 	s_wifi_event_group = xEventGroupCreate();
 	esp_event_handler_instance_t instance_any_id;
 	ESP_ERROR_RETURN(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, &instance_any_id), TAG, "");
