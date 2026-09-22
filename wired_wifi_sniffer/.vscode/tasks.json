@@ -1,0 +1,30 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "extcap: build",
+            "type": "shell",
+            "command": "go",
+            "args": ["build", "-o", "esp32wifi.exe", "."],
+            "options": { "cwd": "${workspaceFolder}/extcap" },
+            "problemMatcher": ["$go"],
+            "group": "build",
+            "detail": "Compile the Wireshark extcap binary"
+        },
+        {
+            "label": "extcap: build & install",
+            "type": "shell",
+            "command": "powershell",
+            "args": [
+                "-NoProfile",
+                "-ExecutionPolicy", "Bypass",
+                "-File", "build.ps1",
+                "-Install"
+            ],
+            "options": { "cwd": "${workspaceFolder}/extcap" },
+            "problemMatcher": ["$go"],
+            "group": { "kind": "build", "isDefault": true },
+            "detail": "Compile and copy into %APPDATA%\\Wireshark\\extcap"
+        }
+    ]
+}

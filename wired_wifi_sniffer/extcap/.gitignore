@@ -1,0 +1,7 @@
+# Built binaries
+esp32wifi
+esp32wifi.exe
+*.exe
+
+# Debug log (opt-in via --debug)
+esp32wifi-extcap.log
