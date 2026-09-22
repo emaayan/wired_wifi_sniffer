@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.16)
 
 #set(SDKCONFIG "${CMAKE_BINARY_DIR}/sdkconfig")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-idf_build_set_property(MINIMAL_BUILD ON)
+#idf_build_set_property(MINIMAL_BUILD ON) # this requires explicitly specifying all the depedencies in the main componnet 
 
 file(READ "version.txt" PROJECT_VER)
 set(PROJECT_PREF "WirelessSniffer") 

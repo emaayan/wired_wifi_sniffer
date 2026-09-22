@@ -392,7 +392,10 @@ static int hex_to_byte_array(const char *hexArray, size_t hexLength, uint8_t byt
 }
 
 static esp_err_t sniffer_save_mac_filter(const char *value) {
-	char *prev_value = "";
+	// Writable buffer required: sniffer_load_mac_filter() -> nvs_get_string() memcpy's
+	// into it. A string-literal pointer here faulted under GCC 14.2 / IDF 5.5.5
+	// (Dbus write to cache rejected). MAC filter is at most 12 hex chars + NUL.
+	char prev_value[16] = "";
 	size_t sz = 0;
 	if (sniffer_load_mac_filter(prev_value, &sz) == ESP_OK) {
 		size_t cur_sz = strlen(value);
@@ -466,8 +469,13 @@ static void sniffer_set_frame_type_filter() {
 }
 
 static void sniffer_set_mac_filter() {
-	char *value = SNIFFER_DEFAULT_MAC;
-	size_t sz = 0;
+	// A MAC filter is at most 12 hex chars + NUL (see sniffer_filter_mac). `value`
+	// must be a WRITABLE buffer: nvs_get_string() memcpy's the default (or the stored
+	// value) into it. The previous code pointed it at the SNIFFER_DEFAULT_MAC string
+	// literal (read-only flash), so on a card with no "mac" key in NVS the write faulted
+	// with "Dbus write to cache rejected" and the device boot-looped.
+	char value[16] = SNIFFER_DEFAULT_MAC;
+	size_t sz = 0; // keep 0 so the not-found path leaves the filter empty
 	sniffer_load_mac_filter(value, &sz);
 	ESP_LOGI(TAG, "filter len %d ", sz);
 	sniffer_filter_mac(value, sz);

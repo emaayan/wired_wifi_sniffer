@@ -8,6 +8,7 @@
 #include "esp_check.h"
 
 #include "tinyusb.h"
+#include "tinyusb_default_config.h"
 #include "tinyusb_net.h"
 
 #include "dhcpserver/dhcpserver.h"
@@ -60,10 +61,37 @@ static esp_err_t tinyusb_netif_recv_cb(void *buffer, uint16_t len, void *ctx) {
 	return ESP_OK;
 }
 
+// Windows 11 (KB5124008, Sept 2026) tightened usbncm.sys/usbccgp.sys validation:
+// an NCM device that carries an IAD in its configuration descriptor must NOT declare
+// bDeviceClass=0x00 in its device descriptor, or it fails to start (Code 10 / fatal
+// device hardware error). esp_tinyusb's built-in descriptor_dev_default only sets the
+// IAD class (0xEF/0x02/0x01) when CFG_TUD_CDC is enabled, so an NCM-only build gets 0x00
+// and trips the bug (espressif/esp-usb#591). Instead of patching the component, we supply
+// our own compliant device descriptor via the v2 API (config.descriptor.device); the
+// default config/string descriptors are still used for everything else.
+static const tusb_desc_device_t s_ncm_device_desc = {
+	.bLength = sizeof(tusb_desc_device_t),
+	.bDescriptorType = TUSB_DESC_DEVICE,
+	.bcdUSB = 0x0200,
+	.bDeviceClass = TUSB_CLASS_MISC,        // 0xEF - required when an IAD is present
+	.bDeviceSubClass = MISC_SUBCLASS_COMMON, // 0x02
+	.bDeviceProtocol = MISC_PROTOCOL_IAD,    // 0x01
+	.bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
+	.idVendor = TINYUSB_ESPRESSIF_VID,       // 0x303A, matches CONFIG_TINYUSB_DESC_USE_ESPRESSIF_VID
+	.idProduct = 0x4000,                     // NCM-only PID (esp_tinyusb USB_TUSB_PID base)
+	.bcdDevice = CONFIG_TINYUSB_DESC_BCD_DEVICE,
+	.iManufacturer = 0x01,
+	.iProduct = 0x02,
+	.iSerialNumber = 0x03,
+	.bNumConfigurations = 0x01,
+};
+
 static esp_err_t create_usb_eth_if(esp_netif_t *s_netif, tusb_net_rx_cb_t tusb_net_rx_cb, tusb_net_free_tx_cb_t tusb_net_free_tx_cb) {
-	const tinyusb_config_t tusb_cfg = {
-		.external_phy = false,
-	};
+	// esp_tinyusb 2.x: struct replaced the old `.external_phy` field with a
+	// port/phy/descriptor layout. Start from the default config, then override only
+	// the device descriptor with our Win11-compliant one (see s_ncm_device_desc).
+	tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
+	tusb_cfg.descriptor.device = &s_ncm_device_desc;
 
 	ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
 	
@@ -77,7 +105,8 @@ static esp_err_t create_usb_eth_if(esp_netif_t *s_netif, tusb_net_rx_cb_t tusb_n
 	// uint8_t e_mac[6]={0};
 	ESP_ERROR_CHECK(esp_read_mac(net_config.mac_addr, ESP_MAC_ETH));
 
-	ESP_ERROR_CHECK(tinyusb_net_init(TINYUSB_USBDEV_0, &net_config));
+	// esp_tinyusb 2.x: tinyusb_net_init() no longer takes a port argument.
+	ESP_ERROR_CHECK(tinyusb_net_init(&net_config));
 
 	return ESP_OK;
 }
